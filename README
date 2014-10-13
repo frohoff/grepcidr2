@@ -1,0 +1,80 @@
+grepcidr 2.95 - Filter IP addresses matching IPv4 and IPv6 CIDR specification
+Parts Copyright (C) 2004-2005  Jem E. Berkes <jberkes@pc-tools.net>
+	http://www.pc-tools.net/unix/grepcidr/
+
+Revised by John Levine <johnl@taugh.com> Dec 2013, who makes no copyright
+claims to the modifications.
+
+
+PURPOSE
+-------
+grepcidr can be used to filter a list of IP addresses against one or more
+Classless Inter-Domain Routing (CIDR) specifications, or arbitrary networks
+specified by an address range. As with grep, there are options to invert
+matching and load patterns from a file. grepcidr is capable of comparing
+thousands or even millions of IPs to networks with little memory usage and
+in reasonable computation time.
+
+grepcidr has endless uses in network software, including: mail filtering and
+processing, network security, log analysis, and many custom applications.
+
+Many thanks to Dick Wesseling <ftu@fi.uu.nl> who suggested an improved data
+structure format as well as binary search, to improve grepcidr performance.
+
+
+COMPILING & INSTALLING
+----------------------
+Edit Makefile to customize the build. Then,
+make
+make install
+
+
+COMMAND USAGE
+-------------
+Usage:
+        grepcidr [-V] [-cvaih] PATTERN [FILE ...]
+        grepcidr [-V] [-cvaih] [-e PATTERN | -f FILE] [FILE ...]
+
+-V	Show software version
+-a	Anchor matches to beginning of line, otherwise match anywhere
+-c	Display count of the lines that would have been shown, instead of showing them
+-v	Invert the sense of matching, to select non-matching IP addresses
+-e	Specify pattern(s) on command-line
+-f	Obtain CIDR and range pattern(s) from file
+-i	Ignore patterns that are not valid CIDRs or ranges
+-h	Do not print filenames when matching multiple files
+
+PATTERN specified on the command line may contain multiple patterns
+separated by whitespace or commas. For long lists of network patterns,
+specify a -f FILE to load where each line contains one pattern. Comment
+lines starting with # are ignored, as are comments following white space
+after a pattern.  Use -i to ignore invalid pattern lines.
+
+Each pattern, whether on the command line or inside a file, may be:
+CIDR format	a.b.c.d/xx or aa:bb::cc::dd/xx
+IP range	a.b.c.d-e.f.g.h
+Single IP	a.b.c.d or aa:bb:cc::dd
+
+IPv6 addresses can be written in any format including embedded IPv4.
+The zero address :: is accepted as a pattern but does not match in
+files.  (Use regular grep if that's what you're looking for,)  It does
+not accept IPv6 ranges, since few people use them.
+
+
+EXAMPLES
+--------
+
+grepcidr -f ournetworks blocklist > abuse.log
+	Find our customers that show up in blocklists
+
+grepcidr 127.0.0.0/8,::1 iplog
+	Searches for any localnet IP addresses inside the iplog file
+
+grepcidr "192.168.0.1-192.168.10.13" iplog
+	Searches for IPs matching indicated range in the iplog file
+
+script | grepcidr -ivf whitelist > blacklist
+	Create a blacklist, with whitelisted networks removed (inverse)
+
+grepcidr -if list1 list2
+	Cross-reference two lists, outputs IPs common to both lists
