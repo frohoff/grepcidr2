@@ -1,6 +1,6 @@
 /*
 
-  grepcidr 2.98 - Filter IP addresses matching IPv4 and IPv6 CIDR specification
+  grepcidr 2.99 - Filter IP addresses matching IPv4 and IPv6 CIDR specification
   Parts copyright (C) 2004, 2005  Jem E. Berkes <jberkes@pc-tools.net>
   	www.sysdesign.ca
   Somewhat rewritten by John Levine <johnl@taugh.com>
@@ -18,7 +18,7 @@
   You should have received a copy of the GNU General Public License
   along with this program; if not, write to the Free Software
   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
-  $Header: /home/johnl/hack/grepcidr-2.98/RCS/grepcidr.c,v 1.8 2014/01/18 20:42:39 johnl Exp $
+  $Header: /Users/johnl/grepcidr-2.99/RCS/grepcidr.c,v 1.4 2015/06/09 15:16:35 johnl Exp $
 */
 
 
@@ -37,10 +37,10 @@
 #define EXIT_NOMATCH	1
 #define EXIT_ERROR	2
 
-#define TXT_VERSION	"grepcidr 2.98\nParts copyright (C) 2004, 2005  Jem E. Berkes <jberkes@pc-tools.net>\n"
+#define TXT_VERSION	"grepcidr 2.99\nParts copyright (C) 2004, 2005  Jem E. Berkes <jberkes@pc-tools.net>\n"
 #define TXT_USAGE	"Usage:\n" \
-			"\tgrepcidr [-V] [-cvhais] PATTERN [FILE...]\n" \
-			"\tgrepcidr [-V] [-cvhais] [-e PATTERN | -f FILE] [FILE...]\n"
+			"\tgrepcidr [-V] [-cCvhais] PATTERN [FILE...]\n" \
+			"\tgrepcidr [-V] [-cCvhais] [-e PATTERN | -f FILE] [FILE...]\n"
 #define MAXFIELD	512
 #define TOKEN_SEPS	"\t,\r\n"	/* so user can specify multiple patterns on command line */
 #define INIT_NETWORKS	8192
@@ -81,10 +81,12 @@ static int nonames = 0;				/* don't show filenames */
 static int nmatch = 0;				/* count of matches for exit code */
 static int igbadpat = 0;			/* ignore bad patterns */
 static int sloppy = 0;				/* don't complain about sloppy CIDR */
+static int cidrsearch = 0;			/* parse and match CIDR in haystack */
 static int quick = 0;				/* quick match, ignore v4 with dots before or after */
 
 static void scan_block(char *bp, size_t blen, const char *fn);
 static void scan_read(FILE *f, const char *fn);
+static int applymask6(const v6addr ahi, int size, struct netspec6 *spec);
 
 /* for getline */
 char *linep = NULL;
@@ -329,7 +331,7 @@ int net_parse6(const char* line, struct netspec6* spec)
 	int nlo = 0;	/* how many bytes in alo */
 	int octet = -1;	/* current v4 octet, -1 means not an octet */
 	unsigned int chunk = 0;	/* current 16 bit chunk */
-	unsigned int size = 0;
+	int size = -1;
 	enum sv6 {
 		V_BEG = 0,	/* beginning of string */
 		V_HCH,		/* in a hi chunk */
@@ -531,10 +533,11 @@ int net_parse6(const char* line, struct netspec6* spec)
 
 			case V_SIZE:
 				if(isdigit(ch)) {
+					if (size < 0) size = 0;
 					size = size*10 + ch-'0';
 					continue;
 				}
-				if(!size || size > 128) return 0;	/* junk at the end */
+				if(size < 0 || size > 128) return 0;	/* no digits or junk at the end */
 				break;
 		}
 		break;
@@ -547,13 +550,26 @@ int net_parse6(const char* line, struct netspec6* spec)
 	if((nhi+nlo) < 16) 
 		memset(ahi.a+nhi, 0, 16-(nhi+nlo));
 	if(nlo)memcpy(ahi.a+16-nlo, alo.a, nlo);
+	if (!applymask6(ahi, size, spec) && !sloppy) {
+		p = strchr(line, '\n');
+		if(p) *p = 0;	/* just a string */
+			fprintf(stderr, "Bad cidr range: %s\n", line);
+	}
+	return 1;
+}
+
+/* Return 0 (softfail) if bits were set in host part of CIDR address */
+static int applymask6(const v6addr ahi, int size, struct netspec6 *spec)
+{
+	int badbits = 0;	/* bits already set, bad CIDR */
+	assert(size >= 0 && size <= 128);
+
 	spec->min = spec->max = ahi;
 
-	if(size) {	/* set low bits for the range */
+	if(size >= 0) {	/* set low bits for the range */
 			/* and also check that they were already zero */
 		int nbits = size&7; /* bits within a byte */
 		int nbytes = size >> 3;
-		int badbits = 0;	/* bits already set, bad CIDR */
 
 		if(nbits) {
 			int mask = 255>>nbits;	
@@ -569,16 +585,9 @@ int net_parse6(const char* line, struct netspec6* spec)
 			spec->max.a[nbytes] = 255;
 			nbytes++;
 		}
-		if(badbits && !sloppy) {
-			p = strchr(line, '\n');
-
-			if(p) *p = 0;	/* just a string */
-			fprintf(stderr, "Bad cidr range: %s\n", line);
-		}
 	}
-	return 1;
+	return !badbits;
 }
-
 
 /* Compare two netspecs, for sorting. Comparison is done on minimum of range */
 int netsort(const void* a, const void* b)
@@ -599,7 +608,7 @@ int netsort6(const void* a, const void* b)
 
 int main(int argc, char* argv[])
 {
-	static char shortopts[] = "ace:f:iqsvV";
+	static char shortopts[] = "acCe:f:iqsvV";
 	char* pat_filename = NULL;		/* filename containing patterns */
 	char* pat_strings = NULL;		/* pattern strings on command line */
 	int foundopt;
@@ -644,6 +653,10 @@ int main(int argc, char* argv[])
 
 			case 's':
 				sloppy = 1;
+				break;
+
+			case 'C':
+				cidrsearch = 1;
 				break;
 
 			case 'e':
@@ -852,8 +865,8 @@ static void scan_read(FILE *f, const char *fn)
 	      scan_block(linep, len, fn);
 }
 
-static int netmatch(unsigned int ip4);
-static int netmatch6(v6addr ip6);
+static int netmatch(const struct netspec ip4);
+static int netmatch6(const struct netspec6 ip6);
 
 /* scan some text, must be whole lines
  * generally either one line or the whole file
@@ -877,6 +890,7 @@ static void scan_block(char *bp, size_t blen, const char *fn)
 		S_IP3,		/* third octet */
 		S_IP3D,		/* dot after third octet */
 		S_IP4,		/* fourth octet */
+		S_V4SZ,		/* v4 cidr prefix */
 		S_HCH,		/* in a hi v6 chunk */
 		S_HC1,		/* hi, seen one colon */
 		S_HC2,		/* hi, seen two colons */
@@ -889,6 +903,7 @@ static void scan_block(char *bp, size_t blen, const char *fn)
 		S_EIP3,		/* third octet */
 		S_EIP3D,	/* dot after third octet */
 		S_EIP4,		/* fourth octet */
+		S_V6SZ,		/* v6 cidr prefix */
 		S_SCNL,		/* scan for new line */
 		S_SCNLP		/* scan for new line and print line */
 	} state;
@@ -899,8 +914,11 @@ static void scan_block(char *bp, size_t blen, const char *fn)
 	char *lp = bp;		/* beginning of current line */
 	unsigned int ip4 = 0;	/* IPv4 value */
 	int octet = 0;		/* current octet */
+	int size = -1;		/* CIDR size */
 	v6addr ahi;		/* high part of address */
 	v6addr alo;		/* low part of address */
+	struct netspec range4;  /* IPv4 address or range */
+	struct netspec6 range6; /* IPv6 address or range */
 	int nhi = 0;		/* how many bytes in ahi */
 	int nlo = 0;		/* how many bytes in alo */
 	unsigned int chunk = 0;	/* current 16 bit chunk */
@@ -1000,9 +1018,15 @@ static void scan_block(char *bp, size_t blen, const char *fn)
 				}
 				/* was it full address? */
 				if(nhi == 16) {
+					if(cidrsearch && ch == '/') {
+						size = 0;
+						state = S_V6SZ;
+						continue;
+					}
 					if(!n6patterns) break;	/* no v6 patterns */
 					seenone = 1;
-					if(!netmatch6(ahi))
+					range6.min = range6.max = ahi;
+					if(!netmatch6(range6))
 						break; /* didn't match */
 					state = S_SCNLP;
 					goto scnlp;	/* in case it was a \n */
@@ -1042,10 +1066,36 @@ static void scan_block(char *bp, size_t blen, const char *fn)
 						continue;
 					break;	/* don't match :: as zero address */
 				}
-				if(!n6patterns) break;	/* no v6 patterns */
 				memset(ahi.a+nhi, 0, 16-nhi);	/* zero low bytes */
+				if(cidrsearch && ch == '/') {
+					size = 0;
+					state = S_V6SZ;
+					continue;
+				} else
+					size = -1;
+
+				if(!n6patterns) break;	/* no v6 patterns */
 				seenone = 1;
-				if(!netmatch6(ahi))
+				range6.min = range6.max = ahi;
+				if(!netmatch6(range6))
+					break; /* didn't match */
+				state = S_SCNLP;
+				goto scnlp;	/* in case it was a \n */
+
+			case S_V6SZ:
+				if(isdigit(ch)) {
+					if (size >= 0)
+						size = size*10 + ch-'0';
+					if(size > 128) /* gobble up the rest */
+						size = -1;
+					continue;
+				}
+				if(!n6patterns) break;	/* no v6 patterns */
+				seenone = 1;
+				if (size < 0) size = 0; /* ignore bad prefix */
+				/* TODO: check badbits? naah */
+				applymask6(ahi, size, &range6);
+				if(!netmatch6(range6))
 					break; /* didn't match */
 				state = S_SCNLP;
 				goto scnlp;	/* in case it was a \n */
@@ -1087,11 +1137,17 @@ static void scan_block(char *bp, size_t blen, const char *fn)
 				}
 				/* end of lo part, check it */
 				if((nhi+nlo) >= 14) break;	/* too many chunks. not an IP */
-				if(!n6patterns) break;		/* no v6 patterns */
 				memset(ahi.a+nhi, 0, 16-(nhi+nlo));	/* combine hi and lo parts */
 				memcpy(ahi.a+(16-nlo), alo.a, nlo);
+				if(cidrsearch && ch == '/') {
+					state = S_V6SZ;
+					size = 0;
+					continue;
+				}
+				if(!n6patterns) break;		/* no v6 patterns */
 				seenone = 1;
-				if(!netmatch6(ahi))
+				range6.min = range6.max = ahi;
+				if(!netmatch6(range6))
 					break; /* didn't match */
 				state = S_SCNLP;
 				goto scnlp;	/* in case it was a \n */
@@ -1171,14 +1227,41 @@ static void scan_block(char *bp, size_t blen, const char *fn)
 				}
 				ip4 <<= 8;
 				ip4 += octet;
+				if(cidrsearch && ch == '/') {
+					state = S_V4SZ;
+					size = 0;
+					continue;
+				}
 				if(npatterns) {
 					seenone = 1;
-					if(!netmatch(ip4))
+					range4.min = range4.max = ip4;
+					if(!netmatch(range4))
 						break; /* didn't match */
 					state = S_SCNLP;
 					goto scnlp;	/* in case it was a \n */
 				}
 				break;	/* no v4 patterns */
+
+                        case S_V4SZ:    /* cidr size */
+				if(isdigit(ch)) {
+					if (size >= 0)
+						size = size*10 + ch-'0';
+					if(size > 32) /* gobble up the rest */
+						size = -1;
+					continue;
+				}
+				if(!npatterns) break;	/* no v4 patterns */
+				seenone = 1;
+				range4.min = range4.max = ip4;
+				if(size >= 0) {		/* ignore bad prefix */
+					int mask = (1L<<(32-size))-1;
+					range4.min &= ~mask; /* force to CIDR boundary */
+					range4.max |= mask;
+				}
+				if(!netmatch(range4))
+					break; /* didn't match */
+				state = S_SCNLP;
+				goto scnlp;	/* in case it was a \n */
 				
 			case S_EIP2:	/* in embedded octet */
 			case S_EIP3:
@@ -1210,16 +1293,26 @@ static void scan_block(char *bp, size_t blen, const char *fn)
 				if(octet > 255) { /* not a real address */
 					break;
 				}
+                                /* no CIDR allowed with IPv4 embedded in IPv6 */
 				ahi.a[nhi++] = octet;
 				seenone = 1;
-				if(n6patterns && netmatch6(ahi)) {	/* try a v6 pattern */
-					state = S_SCNLP;
-					goto scnlp;	/* in case it was a \n */
+				if(n6patterns) {
+					range6.min = range6.max = ahi;
+					if(netmatch6(range6)) {	/* try a v6 pattern */
+						state = S_SCNLP;
+						goto scnlp;	/* in case it was a \n */
+					}
 				}
 				/* get the v4 address as an int and try
 				 * that */
 				ip4 = (ahi.a[12]<<24)|(ahi.a[13]<<16)|(ahi.a[14]<<8)|ahi.a[15];
-				if(!npatterns || !netmatch(ip4))
+				if(cidrsearch && ch == '/') {
+					state = S_V4SZ;
+					size = 0;
+					continue;
+				}
+				range4.min = range4.max = ip4;
+				if(!npatterns || !netmatch(range4))
 					break; /* didn't match */
 
 				state = S_SCNLP;
@@ -1272,7 +1365,7 @@ scnlp:
  * binary range search for a value
  */
 static int
-netmatch(unsigned int ip4)
+netmatch(const struct netspec ip4)
 {
 	int minx = 0;
 	int maxx = npatterns-1;
@@ -1281,32 +1374,34 @@ netmatch(unsigned int ip4)
 	{	/* DEBUG */
 
 		assert(npatterns);	/* don't call this if there are no v4 patterns */
-		printf("match: %x %d.%d.%d.%d\n", ip4, ip4>>24, (ip4>>16)&255, (ip4>>8)&255, ip4&255);
+		printf("match: %x %d.%d.%d.%d-%x %d.%d.%d.%d\n", ip4.min, ip4.min>>24,
+		       (ip4.min>>16)&255, (ip4.min>>8)&255, ip4.min&255,
+		       ip4.max, ip4.max>>24, (ip4.max>>16)&255, (ip4.max>>8)&255, ip4.max&255);
 	}
 # endif
 	/* make sure it's in range */
-	if(ip4 < array[minx].min || ip4 > array[maxx].max) return 0;
+	if(ip4.min < array[minx].min || ip4.min > array[maxx].max) return 0;
 
 	while(minx < maxx) {
 		int tryx = (minx+maxx)/2;
 
-		if(ip4 < array[tryx].min) {
+		if(ip4.min < array[tryx].min) {
 			maxx = tryx-1;
 			continue;
 		}
-		if(ip4 > array[tryx].max) {
+		if(ip4.min > array[tryx].max) {
 			minx = tryx+1;
 			continue;
 		}
-		return 1;	/* gee, we found it */
+		break;	/* gee, we may have found it */
 	}
 
-	if(ip4 >= array[minx].min && ip4 <= array[minx].max) return 1;
+	if(ip4.min >= array[minx].min && ip4.max <= array[minx].max) return 1;
 	return 0;	/* not in the current entry */
 }
 
 static int
-netmatch6(v6addr ip6)
+netmatch6(const struct netspec6 ip6)
 {
 	int minx = 0;
 	int maxx = n6patterns-1;
@@ -1317,27 +1412,42 @@ netmatch6(v6addr ip6)
 
 		assert(n6patterns);	/* don't call this if there are no v6 patterns */
 		printf("match:");
-		for(i = 0; i<16; i++) printf(" %02x", ip6.a[i]);
+		for(i = 0; i<16; i++) printf(" %02x", ip6.min.a[i]);
+		printf("-");
+		for(i = 0; i<16; i++) printf(" %02x", ip6.max.a[i]);
 		printf("\n");
 	}
 # endif
 	/* make sure it's in range */
-	if(v6cmp(ip6, array6[minx].min) < 0 || v6cmp(ip6, array6[maxx].max) > 0) return 0;
+	if(v6cmp(ip6.min, array6[minx].min) < 0 || v6cmp(ip6.min, array6[maxx].max) > 0) return 0;
 
 	while(minx < maxx) {
 		int tryx = (minx+maxx)/2;
 
-		if(v6cmp(ip6, array6[tryx].min)<0) {
+		if(v6cmp(ip6.min, array6[tryx].min)<0) {
 			maxx = tryx-1;
 			continue;
 		}
-		if(v6cmp(ip6, array6[tryx].max)>0) {
+		if(v6cmp(ip6.min, array6[tryx].max)>0) {
 			minx = tryx+1;
 			continue;
 		}
-		return 1;	/* gee, we found it */
+		break; /* gee, we may have found it */
 	}
 
-	if(v6cmp(ip6, array6[minx].min) >= 0 && v6cmp(ip6, array6[minx].max) <= 0) return 1;
+# if DEBUG
+	{	/* DEBUG */
+		int i;
+
+		assert(n6patterns);	/* don't call this if there are no v6 patterns */
+		printf("candidate: %d/%d", minx, maxx);
+		for(i = 0; i<16; i++) printf(" %02x", array6[minx].min.a[i]);
+		printf("-");
+		for(i = 0; i<16; i++) printf(" %02x", array6[minx].max.a[i]);
+		printf("\n");
+	}
+# endif
+
+	if(v6cmp(ip6.min, array6[minx].min) >= 0 && v6cmp(ip6.max, array6[minx].max) <= 0) return 1;
 	return 0;	/* not in the current entry */
 }

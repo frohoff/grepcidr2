@@ -1,10 +1,12 @@
-grepcidr 2.95 - Filter IP addresses matching IPv4 and IPv6 CIDR specification
+grepcidr 2.99 - Filter IP addresses matching IPv4 and IPv6 CIDR specification
 Parts Copyright (C) 2004-2005  Jem E. Berkes <jberkes@pc-tools.net>
 	http://www.pc-tools.net/unix/grepcidr/
 
 Revised by John Levine <johnl@taugh.com> Dec 2013, who makes no copyright
 claims to the modifications.
 
+Thanks to Kjetil Torgrim Homme <kjetil.homme@redpill-linpro.com> for
+the CIDR matching code.
 
 PURPOSE
 -------
@@ -38,6 +40,7 @@ Usage:
 -V	Show software version
 -a	Anchor matches to beginning of line, otherwise match anywhere
 -c	Display count of the lines that would have been shown, instead of showing them
+-C	Parse CIDR ranges in input and only match if a search term encompasses the entire range.
 -v	Invert the sense of matching, to select non-matching IP addresses
 -e	Specify pattern(s) on command-line
 -f	Obtain CIDR and range pattern(s) from file

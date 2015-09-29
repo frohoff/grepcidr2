@@ -3,12 +3,12 @@
 grepcidr \(em Filter IP addresses matching IPv4 and IPv6 address specifications
 .SH "SYNOPSIS" 
 .PP 
-\fBgrepcidr\fR [\fB-V\fP]  [\fB-cvahisq\fP]  \fIPATTERN\fP [\fIFILE ...\fP]  
+\fBgrepcidr\fR [\fB-V\fP]  [\fB-cCvahisq\fP]  \fIPATTERN\fP [\fIFILE ...\fP]  
 .PP 
-\fBgrepcidr\fR [\fB-V\fP]  [\fB-cvahisq\fP] [\fB-e \fIPATTERN\fR\fP | \fB-f \fIFILE\fP]  [\fIFILE ...\fP]
+\fBgrepcidr\fR [\fB-V\fP]  [\fB-cCvahisq\fP] [\fB-e \fIPATTERN\fR\fP | \fB-f \fIFILE\fP]  [\fIFILE ...\fP]
 .SH "DESCRIPTION" 
 .PP 
-\fBgrepcidr\fR can be used to filter a list of IP addresses against one or more 
+\fBgrepcidr\fR can be used to filter a list of IP addresses and ranges against one or more 
 IPv4 and IPv6 address ranges.  As with grep, there are options to invert 
 matching and load patterns from a file.  grepcidr is designed to scale well,
 and handle large numbers of patterns and large input files efficiently.
@@ -34,6 +34,8 @@ Do not print file names with matched lines
 Ignore bad patterns
 .IP "\fB-s\fP" 10 
 (Sloppy) Don't complain about misaligned CIDR ranges.
+.IP "\fB-C\fP" 10 
+Parse CIDR ranges in input and only match if a search term encompasses the entire range.
 .IP "\fB-q\fP" 10 
 (Quick) Ignore IPv4 addresses that are followed by a dot.
 .SH "USAGE NOTES" 
